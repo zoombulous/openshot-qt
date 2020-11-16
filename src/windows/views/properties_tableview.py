@@ -270,7 +270,7 @@ class PropertiesTableView(QTableView):
                 self.new_value = min(property_max, self.new_value)
 
                 # Update value of this property
-                self.clip_properties_model.value_updated(self.selected_item, -1, self.new_value)
+                self.clip_properties_model.update_value(self.selected_item, self.new_value)
 
                 # Repaint
                 self.viewport().update()
@@ -322,12 +322,13 @@ class PropertiesTableView(QTableView):
 
                 # Show color dialog
                 currentColor = QColor(red, green, blue)
-                newColor = QColorDialog.getColor(currentColor, self, _("Select a Color"),
-                                                 QColorDialog.DontUseNativeDialog)
+                newColor = QColorDialog.getColor(
+                    currentColor, self, _("Select a Color"),
+                    QColorDialog.DontUseNativeDialog)
 
                 # Set the new color keyframe
                 if newColor.isValid():
-                    self.clip_properties_model.color_update(self.selected_item, newColor)
+                    self.clip_properties_model.update_value(self.selected_item, newColor)
 
             elif property_type == "font":
                 # Get font from user
@@ -338,12 +339,16 @@ class PropertiesTableView(QTableView):
                 # Update font
                 if ok and font:
                     fontinfo = QFontInfo(font)
-                    # TODO: pass font details to value_updated so we can set multiple values
-                    font_details = { "font_family": fontinfo.family(),
-                                     "font_style": fontinfo.styleName(),
-                                     "font_weight": fontinfo.weight(),
-                                     "font_size_pixel": fontinfo.pixelSize() }
-                    self.clip_properties_model.value_updated(self.selected_item, value=fontinfo.family())
+                    # TODO: Enhance properties_model.interpret_as_type to accept QFont
+                    #       or QFontInfo so we can set multiple values
+                    font_details = {
+                        "font_family": fontinfo.family(),
+                        "font_style": fontinfo.styleName(),
+                        "font_weight": fontinfo.weight(),
+                        "font_size_pixel": fontinfo.pixelSize()
+                        }
+                    self.clip_properties_model.update_value(
+                        self.selected_item, value=font_details.get("font_family"))
 
     def caption_text_updated(self, new_caption_text, caption_model_row):
         """Caption text has been updated in the caption editor, and needs saving"""
@@ -357,7 +362,7 @@ class PropertiesTableView(QTableView):
 
         # Save caption text
         if property_type == "caption" and cur_property[1].get('memo') != new_caption_text:
-            self.clip_properties_model.value_updated(caption_model_row[1], value=new_caption_text)
+            self.clip_properties_model.update_value(caption_model_row[1], value=new_caption_text)
 
     def select_item(self, item_id, item_type):
         """ Update the selected item in the properties window """
@@ -479,7 +484,7 @@ class PropertiesTableView(QTableView):
                 # Update font
                 if ok and font:
                     fontinfo = QFontInfo(font)
-                    self.clip_properties_model.value_updated(self.selected_item, value=fontinfo.family())
+                    self.clip_properties_model.update_value(self.selected_item, value=fontinfo.family())
                 return self.contextMenuEvent(event, release=True)
 
             elif self.property_type == "color":
@@ -590,36 +595,24 @@ class PropertiesTableView(QTableView):
 
     def Bezier_Action_Triggered(self, preset=[]):
         log.info("Bezier_Action_Triggered: %s" % str(preset))
-        if self.property_type != "color":
-            # Update keyframe interpolation mode
-            self.clip_properties_model.value_updated(self.selected_item, interpolation=0, interpolation_details=preset)
-        else:
-            # Update colors interpolation mode
-            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=0, interpolation_details=preset)
+        # Update keyframe interpolation mode
+        self.clip_properties_model.update_interpolation(self.selected_item, interpolation=0, curves=preset)
 
     def Linear_Action_Triggered(self):
         log.info("Linear_Action_Triggered")
-        if self.property_type != "color":
-            # Update keyframe interpolation mode
-            self.clip_properties_model.value_updated(self.selected_item, interpolation=1)
-        else:
-            # Update colors interpolation mode
-            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=1, interpolation_details=[])
+        # Update keyframe interpolation mode
+        self.clip_properties_model.update_interpolation(self.selected_item, interpolation=1)
 
     def Constant_Action_Triggered(self):
         log.info("Constant_Action_Triggered")
-        if self.property_type != "color":
-            # Update keyframe interpolation mode
-            self.clip_properties_model.value_updated(self.selected_item, interpolation=2)
-        else:
-            # Update colors interpolation mode
-            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=2, interpolation_details=[])
+        # Update keyframe interpolation mode
+        self.clip_properties_model.update_interpolation(self.selected_item, interpolation=2)
 
     def Insert_Action_Triggered(self):
         log.info("Insert_Action_Triggered")
         if self.selected_item:
             current_value = QLocale().system().toDouble(self.selected_item.text())[0]
-            self.clip_properties_model.value_updated(self.selected_item, value=current_value)
+            self.clip_properties_model.update_value(self.selected_item, value=current_value)
 
     def Remove_Action_Triggered(self):
         log.info("Remove_Action_Triggered")
@@ -630,7 +623,7 @@ class PropertiesTableView(QTableView):
         choice_value = self.sender().data()
 
         # Update value of dropdown item
-        self.clip_properties_model.value_updated(self.selected_item, value=choice_value)
+        self.clip_properties_model.update_value(self.selected_item, value=choice_value)
 
     def refresh_menu(self):
         """ Ensure we update the menu when our source models change """
