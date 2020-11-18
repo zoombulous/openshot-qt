@@ -387,9 +387,6 @@ class PropertiesModel(updates.UpdateInterface, QObject):
                 "%s %s: can't find %s property %s",
                 item_type, item_id, prop_type, prop_key)
             return
-        log.debug(
-            "%s %s: Removing point %d",
-            item_type, item_id, closest_x)
         if prop_type == "color":
             # Colors have three keyframe lists
             points_to_remove = [
@@ -399,8 +396,16 @@ class PropertiesModel(updates.UpdateInterface, QObject):
         else:
             points_to_remove = [c.data[prop_key]["Points"]]
         for points in points_to_remove:
+            if len(points) <= 1:
+                log.warning(
+                    "%s %s: Can't delete last point for %s!",
+                    item_type, item_id, prop_key)
+                return False
             for point in sorted(points, key=lambda p: p["co"]["X"]):
                 if point["co"]["X"] == closest_x:
+                    log.debug(
+                        "%s %s: Removing point %d",
+                        item_type, item_id, closest_x)
                     points.remove(point)
                     break
             else:
