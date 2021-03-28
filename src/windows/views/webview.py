@@ -34,11 +34,12 @@ from functools import partial
 from random import uniform
 from operator import itemgetter
 import logging
-
+import json
 import openshot  # Python module for libopenshot (required video editing module installed separately)
+
 from PyQt5.QtCore import QFileInfo, pyqtSlot, QUrl, Qt, QCoreApplication, QTimer
 from PyQt5.QtGui import QCursor, QKeySequence, QColor
-from PyQt5.QtWidgets import QMenu
+from PyQt5.QtWidgets import QMenu, QDialog
 
 from classes import info, updates
 from classes import settings
@@ -47,8 +48,7 @@ from classes.logger import log
 from classes.query import File, Clip, Transition, Track
 from classes.waveform import get_audio_data
 from classes.conversion import zoomToSeconds, secondsToZoom
-
-import json
+from classes.effect_init import effect_options
 
 # Constants used by this file
 JS_SCOPE_SELECTOR = "$('body').scope()"
@@ -169,7 +169,7 @@ else:
             from .webview_backend.webkit import TimelineWebKitView as WebViewClass
             WEBVIEW_LOADED = True
         except ImportError:
-            pass
+            log.error("Import failure loading WebKit backend", exc_info=1)
         finally:
             if not WEBVIEW_LOADED:
                 raise RuntimeError(
@@ -429,7 +429,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
             Slice_Keep_Right.triggered.connect(partial(
                 self.Slice_Triggered, MENU_SLICE_KEEP_RIGHT, clip_ids, trans_ids, position))
             menu.addMenu(Slice_Menu)
-            return menu.popup(QCursor.pos())
+            return menu.exec_(QCursor.pos())
 
     @pyqtSlot(str)
     def ShowEffectMenu(self, effect_id=None):
@@ -445,7 +445,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
         # Remove Effect Menu
         menu.addSeparator()
         menu.addAction(self.window.actionRemoveEffect)
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     @pyqtSlot(float, int)
     def ShowTimelineMenu(self, position, layer_id):
@@ -475,7 +475,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
             partial(self.Paste_Triggered, MENU_PASTE, float(position), int(layer_id), [], [])
         )
 
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     @pyqtSlot(str)
     def ShowClipMenu(self, clip_id=None):
@@ -946,7 +946,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
         menu.addAction(self.window.actionRemoveClip)
 
         # Show Context menu
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     def Transform_Triggered(self, action, clip_ids):
         log.debug("Transform_Triggered")
@@ -1462,6 +1462,10 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                 self.copy_clipboard[clip_id] = clip.data
             elif action == MENU_COPY_KEYFRAMES_ALL:
                 self.copy_clipboard[clip_id]['alpha'] = clip.data['alpha']
+                self.copy_clipboard[clip_id]['crop_height'] = clip.data['crop_height']
+                self.copy_clipboard[clip_id]['crop_width'] = clip.data['crop_width']
+                self.copy_clipboard[clip_id]['crop_x'] = clip.data['crop_x']
+                self.copy_clipboard[clip_id]['crop_y'] = clip.data['crop_y']
                 self.copy_clipboard[clip_id]['gravity'] = clip.data['gravity']
                 self.copy_clipboard[clip_id]['scale_x'] = clip.data['scale_x']
                 self.copy_clipboard[clip_id]['scale_y'] = clip.data['scale_y']
@@ -1943,6 +1947,12 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                 right_clip.data.pop('id')
                 right_clip.key.pop(1)
 
+                # Generate new ID to effects on the right (so they become new ones)
+                for clip_propertie_name, propertie_value in right_clip.data.items() :
+                    if clip_propertie_name == "effects":
+                        for item in propertie_value:
+                            item['id'] = get_app().project.generate_id()
+
                 # Set new 'start' of right_clip (need to bump 1 frame duration more, so we don't repeat a frame)
                 right_clip.data["position"] = (round(float(playhead_position) * fps_float) + 1) / fps_float
                 right_clip.data["start"] = (round(float(clip.data["end"]) * fps_float) + 2) / fps_float
@@ -2217,7 +2227,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                 continue
 
             # Keep original 'end' and 'duration'
-            if "original_data" not in clip.data.keys():
+            if "original_data" not in clip.data:
                 clip.data["original_data"] = {
                     "end": clip.data["end"],
                     "duration": clip.data["duration"],
@@ -2236,7 +2246,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                 freeze_seconds = float(speed)
 
                 original_duration = clip.data["duration"]
-                if "original_data" in clip.data.keys():
+                if "original_data" in clip.data:
                     original_duration = clip.data["original_data"]["duration"]
 
                 log.info('Updating timing for clip ID {}, original duration: {}'
@@ -2618,7 +2628,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
         menu.addAction(self.window.actionRemoveTransition)
 
         # Show menu
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     @pyqtSlot(str)
     def ShowTrackMenu(self, layer_id=None):
@@ -2643,7 +2653,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
             self.window.actionRemoveTrack.setEnabled(True)
         menu.addSeparator()
         menu.addAction(self.window.actionRemoveTrack)
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     @pyqtSlot(str)
     def ShowMarkerMenu(self, marker_id=None):
@@ -2654,7 +2664,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
 
         menu = QMenu(self)
         menu.addAction(self.window.actionRemoveMarker)
-        return menu.popup(QCursor.pos())
+        return menu.exec_(QCursor.pos())
 
     @pyqtSlot(str, int)
     def PreviewClipFrame(self, clip_id, frame_number):
@@ -2783,14 +2793,17 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
 
     # Capture wheel event to alter zoom slider control
     def wheelEvent(self, event):
-        if int(QCoreApplication.instance().keyboardModifiers() & Qt.ControlModifier) > 0:
+        if event.modifiers() & Qt.ControlModifier:
+            event.accept()
+            zoom = self.window.sliderZoom
             # For each 120 (standard scroll unit) adjust the zoom slider
             tick_scale = 120
             steps = int(event.angleDelta().y() / tick_scale)
-            self.window.sliderZoom.setValue(self.window.sliderZoom.value() - self.window.sliderZoom.pageStep() * steps)
+            delta = zoom.pageStep() * steps
+            log.debug("Zooming by %d steps", -steps)
+            zoom.setValue(zoom.value() - delta)
         else:
-            # Otherwise pass on to implement default functionality (scroll in QWebEngineView)
-            super(type(self), self).wheelEvent(event)
+            super().wheelEvent(event)
 
     # An item is being dragged onto the timeline (mouse is entering the timeline now)
     def dragEnterEvent(self, event):
@@ -2860,9 +2873,9 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                 return  # Do nothing
 
             # Check for optional start and end attributes
-            if 'start' in file.data.keys():
+            if 'start' in file.data:
                 new_clip["start"] = file.data['start']
-            if 'end' in file.data.keys():
+            if 'end' in file.data:
                 new_clip["end"] = file.data['end']
 
             # Set position and closet track
@@ -2975,11 +2988,45 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
                     log.info("Applying effect {} to clip ID {}".format(name, clip.id))
                     log.debug(clip)
 
-                    # Create Effect
-                    effect = openshot.EffectInfo().CreateEffect(name)
+                    # Handle custom effect dialogs
+                    if name in effect_options:
 
-                    # Get Effect JSON
-                    effect.Id(get_app().project.generate_id())
+                        # Get effect options
+                        effect_params = effect_options.get(name)
+
+                        # Show effect pre-processing window
+                        from windows.process_effect import ProcessEffect
+
+                        try:
+                            win = ProcessEffect(clip.id, name, effect_params)
+
+                        except ModuleNotFoundError as e:
+                            print("[ERROR]: " + str(e))
+                            return
+
+                        print("Effect %s" % name)
+                        print("Effect options: %s" % effect_options)
+
+                        # Run the dialog event loop - blocking interaction on this window during this time
+                        result = win.exec_()
+
+                        if result == QDialog.Accepted:
+                            log.info('Start processing')
+                        else:
+                            log.info('Cancel processing')
+                            return
+
+                        # Create Effect
+                        effect = win.effect # effect.Id already set
+
+                        if effect is None:
+                            break
+                    else:
+                        # Create Effect
+                        effect = openshot.EffectInfo().CreateEffect(name)
+
+                        # Get Effect JSON
+                        effect.Id(get_app().project.generate_id())
                     effect_json = json.loads(effect.Json())
 
                     # Append effect JSON to clip
@@ -3168,6 +3215,7 @@ class TimelineWebView(updates.UpdateInterface, WebViewClass):
         # Connect shutdown signals
         app.aboutToQuit.connect(self.redraw_audio_timer.stop)
         app.aboutToQuit.connect(self.cache_renderer.stop)
+        app.aboutToQuit.connect(self.deleteLater)
 
         # Delay the start of cache rendering
         QTimer.singleShot(1500, self.cache_renderer.start)
